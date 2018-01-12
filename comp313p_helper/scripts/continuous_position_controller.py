@@ -40,38 +40,21 @@ class stdr_controller():
             distance_tolerance = 0.01
             vel_msg = Twist()
 
-            theta = Rotation().Quaternion(self.current_pose.pose.pose.orientation.x, self.current_pose.pose.pose.orientation.y, self.current_pose.pose.pose.orientation.z, self.current_pose.pose.pose.orientation.w).GetEulerZYX()[0]
+            theta = 0
 
-
-            # Rotate to face the correct direction
-            while ((atan2(self.command_pose.y - self.current_pose.pose.pose.position.y,
-                                               self.command_pose.x - self.current_pose.pose.pose.position.x) - theta) > 0.05):
-                theta = Rotation().Quaternion(self.current_pose.pose.pose.orientation.x,
-                                              self.current_pose.pose.pose.orientation.y,
-                                              self.current_pose.pose.pose.orientation.z,
-                                              self.current_pose.pose.pose.orientation.w).GetEulerZYX()[0]
-
-                # angular velocity in the z-axis:
-                vel_msg.angular.x = 0
-                vel_msg.angular.y = 0
-                vel_msg.angular.z = 1 * (atan2(self.command_pose.y - self.current_pose.pose.pose.position.y,
-                                               self.command_pose.x - self.current_pose.pose.pose.position.x) - theta)
-                self.velocity_publisher.publish(vel_msg)
-                self.rate.sleep()
-
-            # Stopping our robot after the movement is over
-            vel_msg.linear.x = 0
-            vel_msg.angular.z = 0
-            self.velocity_publisher.publish(vel_msg)
-
-            # Drive to the waypoint
             while self.get_distance(self.command_pose.x, self.command_pose.y) >= distance_tolerance:
 
+                theta = Rotation().Quaternion(self.current_pose.pose.pose.orientation.x, self.current_pose.pose.pose.orientation.y, self.current_pose.pose.pose.orientation.z, self.current_pose.pose.pose.orientation.w).GetEulerZYX()[0]
                 #Porportional Controller
                 #linear velocity in the x-axis:
                 vel_msg.linear.x = 0.5 * sqrt(pow((self.command_pose.x - self.current_pose.pose.pose.position.x), 2) + pow((self.command_pose.y - self.current_pose.pose.pose.position.y), 2))
                 vel_msg.linear.y = 0
                 vel_msg.linear.z = 0
+
+                #angular velocity in the z-axis:
+                vel_msg.angular.x = 0
+                vel_msg.angular.y = 0
+                vel_msg.angular.z = 1 * (atan2(self.command_pose.y - self.current_pose.pose.pose.position.y, self.command_pose.x - self.current_pose.pose.pose.position.x) - theta)
 
                 #Publishing our vel_msg
                 self.velocity_publisher.publish(vel_msg)
@@ -80,8 +63,6 @@ class stdr_controller():
             vel_msg.linear.x = 0
             vel_msg.angular.z =0
             self.velocity_publisher.publish(vel_msg)
-
-            # TODO: rotate to the desired orientation
 
 
 if __name__ == '__main__':
