@@ -20,7 +20,7 @@ class OccupancyGrid(object):
     # height. The resolution says the length of the side of each cell
     # in metres. By default, all the cells are set to "0" which means
     # that there are no obstacles.
-    def __init__(self, widthInCells, heightInCells, resolution):
+    def __init__(self, widthInCells, heightInCells, resolution, init_val=0):
         self.widthInCells = widthInCells
         self.heightInCells = heightInCells
         self.extentInCells = (self.widthInCells, self.heightInCells)
@@ -31,7 +31,7 @@ class OccupancyGrid(object):
         self.height = heightInCells * self.resolution
         self.extent = (self.width, self.height)
 
-        self.grid = [[0 for y in range(self.heightInCells)] for x in range(self.widthInCells)]
+        self.grid = [[init_val for y in range(self.heightInCells)] for x in range(self.widthInCells)]
         self.complete_grid = []
         self.scale = 1
 
@@ -152,6 +152,35 @@ class OccupancyGrid(object):
         self.height = self.heightInCells * self.resolution
         self.extent = (self.width, self.height)
 
+    def scaleEmptyMap(self):
+
+        planning_map = [[self.getCell(0, 0) for y in range(self.heightInCells / self.scale)] for x in
+                        range(self.widthInCells / self.scale)]
+
+        self.grid = planning_map
+
+        if self.originalGrid is None:
+            self.originalGrid = copy.deepcopy(self.grid)
+
+        self.widthInCells = self.widthInCells / self.scale
+        self.heightInCells = self.heightInCells / self.scale
+        self.extentInCells = (self.widthInCells, self.heightInCells)
+
+        self.resolution = self.resolution * self.scale
+
+        self.width = self.widthInCells * self.resolution
+        self.height = self.heightInCells * self.resolution
+        self.extent = (self.width, self.height)
+
+    def clearMap(self, val=0):
+        """
+        Function to clear the entire map
+        :param val: cell value
+        :return:
+        """
+        self.grid = [[val for y in range(self.heightInCells / self.scale)] for x in
+                        range(self.widthInCells / self.scale)]
+
     # The width of the occupancy map in cells
     def getWidth(self):
         return self.width
@@ -169,8 +198,8 @@ class OccupancyGrid(object):
     # the grid. The conversion uses integer rounding.
     def getCellCoordinatesFromWorldCoordinates(self, worldCoords):
 
-        cellCoords = (clamp(int(worldCoords[0] / self.resolution), 0, self.widthInCells - 1), \
-                      clamp(int(worldCoords[1] / self.resolution), 0, self.heightInCells - 1))
+        cellCoords = (clamp(int(round(worldCoords[0] / self.resolution)), 0, self.widthInCells - 1), \
+                      clamp(int(round(worldCoords[1] / self.resolution)), 0, self.heightInCells - 1))
         
         return cellCoords
     

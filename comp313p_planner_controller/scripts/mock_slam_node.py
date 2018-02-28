@@ -12,6 +12,7 @@ from comp313p_planner_controller.grid_drawer import SearchGridDrawer
 from comp313p_planner_controller.cell import CellLabel
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
+import copy
 
 
 # This class creates a simulation of SLAM data:
@@ -26,9 +27,9 @@ class Mock_Slam_Node(object):
         self.mapServer = rospy.ServiceProxy('static_map', GetMap)
         rospy.loginfo('------> 1')
         resp = self.mapServer()
-        self.occupancyGrid = OccupancyGrid(resp.map.info.width, resp.map.info.height, resp.map.info.resolution)
+        self.occupancyGrid = OccupancyGrid(resp.map.info.width, resp.map.info.height, resp.map.info.resolution, 0.5)
         self.occupancyGrid.setScale(rospy.get_param('plan_scale', 5))
-        self.occupancyGrid.scaleMap()
+        self.occupancyGrid.scaleEmptyMap()
         rospy.loginfo('------> 2')
         self.searchGrid = SearchGrid.fromOccupancyGrid(self.occupancyGrid)
         rospy.loginfo('------> 3')
@@ -36,7 +37,7 @@ class Mock_Slam_Node(object):
         self.gridDrawer.open()
         rospy.loginfo('------> 4')
         self.local_odometry = Odometry()
-        self.laser_sub = rospy.Subscriber("robot0/laser_0", LaserScan, self.parse_scan)
+        self.laser_sub = rospy.Subscriber("robot0/laser_0", LaserScan, self.parse_scan, queue_size=1)
         self.odom_sub = rospy.Subscriber("robot0/odom", Odometry, self.update_odometry)
         # rospy.Timer(rospy.Duration(1),self.update_visualisation)
         rospy.loginfo('------> Initialised')
@@ -45,59 +46,60 @@ class Mock_Slam_Node(object):
         self.local_odometry = msg
 
     def parse_scan(self, msg):
-
+        occupied_points = []
+        current_pose = copy.deepcopy(self.local_odometry.pose.pose)
         for ii in range(int(math.floor((msg.angle_max - msg.angle_min) / msg.angle_increment))):
             # rospy.loginfo("{} {} {}".format(msg.ranges[ii],msg.angle_min,msg.angle_max))
             valid = (msg.ranges[ii] > msg.range_min) and (msg.ranges[ii] < msg.range_max)
+
+            quaternion = (current_pose.orientation.x, current_pose.orientation.y,
+                          current_pose.orientation.z, current_pose.orientation.w)
+            euler = tf.transformations.euler_from_quaternion(quaternion)
+            angle = msg.angle_min + msg.angle_increment * ii + euler[2]
+
+            # If the range is valid find the end point add it to occupied points and set the distance for ray tracing
             if valid:
-                quaternion = (self.local_odometry.pose.pose.orientation.x, self.local_odometry.pose.pose.orientation.y,
-                              self.local_odometry.pose.pose.orientation.z, self.local_odometry.pose.pose.orientation.w)
-                euler = tf.transformations.euler_from_quaternion(quaternion)
-                angle = msg.angle_min + msg.angle_increment * ii + euler[2]
+                point_world_coo = [math.cos(angle) * msg.ranges[ii] + current_pose.position.x,
+                                   math.sin(angle) * msg.ranges[ii] + current_pose.position.y]
 
-                point_world_coo = [math.cos(angle) * msg.ranges[ii] + self.local_odometry.pose.pose.position.x,
-                                   math.sin(angle) * msg.ranges[ii] + self.local_odometry.pose.pose.position.y]
+                occupied_points.append(self.occupancyGrid.getCellCoordinatesFromWorldCoordinates(point_world_coo))
+                dist = msg.ranges[ii]
+            else:
+                dist = msg.range_max
+            between = self.ray_trace(dist- 0.1, angle, msg)
 
-                point_cell_coo = self.occupancyGrid.getCellCoordinatesFromWorldCoordinates(point_world_coo)
-                robot_world_coo = [self.local_odometry.pose.pose.position.x, self.local_odometry.pose.pose.position.y]
-                robot_cell_coo = self.occupancyGrid.getCellCoordinatesFromWorldCoordinates(robot_world_coo)
-                between = self.ray_trace(robot_cell_coo, point_cell_coo)
-
-                for point in between:
-                    try:
+            for point in between:
+                try:
+                    if self.occupancyGrid.getCell(point[0], point[1]) != 1.0:
                         self.occupancyGrid.setCell(point[0], point[1], 0)
-                    except IndexError as e:
-                        print(e)
+                except IndexError as e:
+                    print(e)
 
-                self.occupancyGrid.setCell(point_cell_coo[0], point_cell_coo[1], 1)
-                self.searchGrid.updateFromOccupancyGrid()
+        for point in occupied_points:
+            try:
+                # if self.occupancyGrid.getCell(point[0], point[1]) is not 1:
+                self.occupancyGrid.setCell(point[0], point[1], 1.0)
+            except IndexError as e:
+                print(e)
 
         self.searchGrid.updateFromOccupancyGrid()
 
-    def ray_trace(self, origin, end):
+    def ray_trace(self, dist, angle, scanmsg):
         """
         Function to get a list of points between two points
-        :param origin: position of the origin
-        :param end: position of the end
-        :return: list of points in between the origin and end
+        :param origin: position of the origin in world coordinates
+        :param dist: distance to end point
+        :param angle: angle from robot
+        :param scanmsg: Laser Scan message
+        :return: list of points in between the origin and end point
         """
         points = []
-        diff_x = end[0] - origin[0]
-        diff_y = end[1] - origin[1]
 
-        slope = float(diff_y) / float(diff_x)
-
-        if diff_x > diff_y:
-            step = int(diff_x / math.fabs(diff_x))
-            for x in range(origin[0], end[0], step):
-                y = int((slope * x))
-                points.append([x,y])
-        else:
-            step = int(diff_y / math.fabs(diff_y))
-            for y in range(origin[1], end[1], step):
-                x = int(((1/slope) * y))
-                points.append([x, y])
-
+        space = np.linspace(scanmsg.range_min, dist, scanmsg.range_max * 5)
+        for a in space:
+            point_world_coo = [math.cos(angle) * a + self.local_odometry.pose.pose.position.x,
+                               math.sin(angle) * a + self.local_odometry.pose.pose.position.y]
+            points.append(self.occupancyGrid.getCellCoordinatesFromWorldCoordinates(point_world_coo))
         return points
 
     def update_visualisation(self):
