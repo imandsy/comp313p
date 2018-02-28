@@ -64,7 +64,10 @@ class Mock_Slam_Node(object):
                 between = self.ray_trace(robot_cell_coo, point_cell_coo)
 
                 for point in between:
-                    self.occupancyGrid.setCell(point[0], point[1], 0)
+                    try:
+                        self.occupancyGrid.setCell(point[0], point[1], 0)
+                    except IndexError as e:
+                        print(e)
 
                 self.occupancyGrid.setCell(point_cell_coo[0], point_cell_coo[1], 1)
                 self.searchGrid.updateFromOccupancyGrid()
@@ -78,18 +81,24 @@ class Mock_Slam_Node(object):
         :param end: position of the end
         :return: list of points in between the origin and end
         """
+        points = []
         diff_x = end[0] - origin[0]
         diff_y = end[1] - origin[1]
 
         slope = float(diff_y) / float(diff_x)
-        points = []
-        step = int(diff_x / math.fabs(diff_x))
-        for x in range(origin[0], end[0], step):
-            y = int((slope * x) + origin[1])
-            points.append([x,y])
+
+        if diff_x > diff_y:
+            step = int(diff_x / math.fabs(diff_x))
+            for x in range(origin[0], end[0], step):
+                y = int((slope * x))
+                points.append([x,y])
+        else:
+            step = int(diff_y / math.fabs(diff_y))
+            for y in range(origin[1], end[1], step):
+                x = int(((1/slope) * y))
+                points.append([x, y])
 
         return points
-
 
     def update_visualisation(self):
         # self.gridDrawer.setSearchGrid(self.searchGrid)
