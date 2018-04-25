@@ -291,13 +291,14 @@ namespace stdr_robot
     
     int d = 0;
 
-    while(d < dist)
+    do
     {
       int x = x1 + d * cos(angle);
       int y = y1 + d * sin(angle);
       points.push_back(std::pair<int,int>(x,y));
       d++;
     }
+    while(d < dist);
     
     return points;
   }
@@ -310,55 +311,23 @@ namespace stdr_robot
     const geometry_msgs::Pose2D& newPose,
     const geometry_msgs::Pose2D& previousPose)
   {
-    //NODELET_ERROR_STREAM(__PRETTY_FUNCTION__ << ": invoked");
     if(_map.info.width == 0 || _map.info.height == 0)
       return false;
 
-    int xMapPrev, xMap, yMapPrev, yMap;
-    bool movingForward, movingUpward;
+    //    NODELET_ERROR_STREAM(__PRETTY_FUNCTION__ << ": invoked");
 
-    //Check robot's previous direction to prevent getting stuck when colliding
-    movingForward = _previousMovementXAxis? false: true;
-    if ( fabs(previousPose.x - newPose.x) > 0.001)
-    {
-      movingForward = (previousPose.x > newPose.x)? false: true;
-      _previousMovementXAxis = movingForward;
-    }
-    movingUpward = _previousMovementYAxis? false: true;
-    if ( fabs(previousPose.y - newPose.y) > 0.001)
-    {
-      movingUpward = (previousPose.y > newPose.y)? false: true;
-      _previousMovementYAxis = movingUpward;
-    }
-
-    xMapPrev = movingForward? (int)( previousPose.x / _map.info.resolution ):
-                              ceil( previousPose.x / _map.info.resolution );
-    xMap = movingForward? ceil( newPose.x / _map.info.resolution ):
-                          (int)( newPose.x / _map.info.resolution );
-
-    yMapPrev = movingUpward? (int)( previousPose.y / _map.info.resolution ):
-                              ceil( previousPose.y / _map.info.resolution );
-    yMap = movingUpward? ceil( newPose.y / _map.info.resolution ):
-                        (int)( newPose.y / _map.info.resolution );
-
-    float angle = atan2(yMap - yMapPrev, xMap - xMapPrev);
-    //int x = xMapPrev;
-    //int y = yMapPrev;
-    int d = 2;
     double newX = previousPose.x;
     double newY = previousPose.y;
 
-    while(pow(newPose.x - newX,2) + pow(newPose.y - newY,2) > pow(_map.info.resolution, 2))
-      //    while(pow(xMap - x,2) + pow(yMap - y,2) > 1)
+    float angle = atan2(newPose.y-previousPose.y, newPose.x-previousPose.x);
+    float distanceToNewPose = hypot(newPose.x-previousPose.x, newPose.y-previousPose.y);
+    
+    while(distanceToNewPose > 0)
     {
-      #if 0
-      x = xMapPrev +
-        ( movingForward? ceil( cos(angle) * d ): (int)( cos(angle) * d ) );
-      y = yMapPrev +
-        ( movingUpward? ceil( sin(angle) * d ): (int)( sin(angle) * d ) );
-      #endif
-      double newX = previousPose.x + d * _map.info.resolution * cos(angle);
-      double newY = previousPose.y + d * _map.info.resolution * sin(angle);
+      float stepLength = std::min(0.5f*_map.info.resolution, distanceToNewPose);
+      newX += stepLength * _map.info.resolution * cos(angle);
+      newY += stepLength * _map.info.resolution * sin(angle);
+      distanceToNewPose -= stepLength;
       
       //Check all footprint points
       for(unsigned int i = 0 ; i < _footprint.size() ; i++)
@@ -372,8 +341,6 @@ namespace stdr_robot
         double footprint_y_1 = _footprint[index_1].first * sin(newPose.theta) +
                    _footprint[index_1].second * cos(newPose.theta);
 
-        //int xx1 = x + footprint_x_1 / _map.info.resolution;
-        //int yy1 = y + footprint_y_1 / _map.info.resolution;
 	int xx1 = (newX + footprint_x_1)/ _map.info.resolution;
         int yy1 = (newY + footprint_y_1)/ _map.info.resolution;
         
@@ -385,16 +352,42 @@ namespace stdr_robot
         int xx2 = (newX + footprint_x_2) / _map.info.resolution;
 	int yy2 = (newY + footprint_y_2) / _map.info.resolution;
 
-        //int xx2 = x + footprint_x_2 / _map.info.resolution;
-        //int yy2 = y + footprint_y_2 / _map.info.resolution;
-        
         //Here check all the points between the vertexes
         std::vector<std::pair<int,int> > pts = 
           getPointsBetween(xx1,yy1,xx2,yy2);
+
+	//	NODELET_ERROR_STREAM(__PRETTY_FUNCTION__ << ": pts.size()=" << pts.size());
         
         for(unsigned int j = 0 ; j < pts.size() ; j++)
         {
-          static int OF = 1;
+          static int OF = 0;
+#if 0	 
+	  NODELET_ERROR_STREAM(__PRETTY_FUNCTION__ << ": points="
+			       << _map.data[ (pts[j].second - OF) * 
+					     _map.info.width + pts[j].first - OF ]
+			       << ";" <<
+			       _map.data[ (pts[j].second - OF) * 
+					  _map.info.width + pts[j].first ]
+			       << ";" <<
+			       _map.data[ (pts[j].second - OF) *  
+					  _map.info.width + pts[j].first + OF ]
+			       << ";" <<
+			       _map.data[ (pts[j].second) * 
+					  _map.info.width + pts[j].first - OF ]
+			       << ";" <<
+			       _map.data[ (pts[j].second) * 
+					  _map.info.width + pts[j].first + OF ]
+			       << ";" <<
+			       _map.data[ (pts[j].second + OF) * 
+					  _map.info.width + pts[j].first - OF ]
+			       << ";" <<
+			       _map.data[ (pts[j].second + OF) * 
+					  _map.info.width + pts[j].first ]
+			       << ";" <<
+			       _map.data[ (pts[j].second + OF) * 
+					  _map.info.width + pts[j].first + OF ]);
+
+#endif
           if(
             _map.data[ (pts[j].second - OF) * 
               _map.info.width + pts[j].first - OF ] > 70 ||
@@ -414,7 +407,7 @@ namespace stdr_robot
               _map.info.width + pts[j].first + OF ] > 70
           )
           {
-	    #if 0
+#if 0
 	    NODELET_ERROR_STREAM(__PRETTY_FUNCTION__ << ": collision");
 	    NODELET_ERROR_STREAM(__PRETTY_FUNCTION__ << ": resolution=" << _map.info.resolution);
 	    NODELET_ERROR_STREAM(__PRETTY_FUNCTION__ << ": f_x1=" << footprint_x_1 << "; f_y1=" << footprint_y_1);
@@ -447,17 +440,11 @@ namespace stdr_robot
 					     _map.info.width + pts[j].first ] > 70) <<
 				 (_map.data[ (pts[j].second + OF) * 
 					     _map.info.width + pts[j].first + OF ] > 70));
-	    #endif
+#endif
             return true;
           }
         }
       }
-      if ( (movingForward && newPose.x < newX) || (movingUpward && newPose.y < newY) ||
-          (!movingForward && newPose.x > newX) || (!movingUpward && newPose.y > newY) )
-      {
-        break;
-      }
-      d++;
     }
     return false;
   }
@@ -479,6 +466,9 @@ namespace stdr_robot
     }
     else
     {
+      NODELET_ERROR_STREAM("Collision detected when moving from ("
+			   << _previousPose.x << "," << _previousPose.y << "," << _previousPose.theta
+			   << ") to ("<< pose.x << "," << pose.y << "," << pose.theta << ")");
       _motionControllerPtr->setPose(_previousPose);
     }
     //!< Robot tf

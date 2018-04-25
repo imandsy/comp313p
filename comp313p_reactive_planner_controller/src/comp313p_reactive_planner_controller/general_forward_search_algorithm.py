@@ -17,10 +17,19 @@ class GeneralForwardSearchAlgorithm(PlannerBase):
     
     def __init__(self, title, occupancyGrid):
         PlannerBase.__init__(self, title, occupancyGrid)
-         
+
+        # If the goal cell is occupied, the planner will still find a
+        # route. If the following flag is set to true the planner
+        # will, however, not go to the goal but stop one cell short.
+        self.removeGoalCellFromPathIfOccupied = False
+        self.goalCellLabel = None
+
         # Flag to store if the last plan was successful
         self.goalReached = None
 
+    def setRemoveGoalCellFromPathIfOccupied(self, newValue):
+        self.removeGoalCellFromPathIfOccupied = newValue
+        
     # These methods manage the queue of cells to be visied.
     def pushCellOntoQueue(self, cell):
         raise NotImplementedError()
@@ -59,6 +68,10 @@ class GeneralForwardSearchAlgorithm(PlannerBase):
     # Handle the case that a cell has been visited already.
     def resolveDuplicate(self, cell):
         raise NotImplementedError()
+
+    # Get the search grid
+    def getSearchGrid(self):
+        return self.searchGrid
     
     # Compute the additive cost of performing a step from the parent to the
     # current cell. This calculation is carried out the same way no matter
@@ -76,31 +89,50 @@ class GeneralForwardSearchAlgorithm(PlannerBase):
         L = sqrt(dX * dX + dY * dY)
         
         return L
-        
-    # The main search routine. The routine searches for a path between a given
-    # set of coordinates. These are then converted into start and destination
-    # cells in the search grid and the search algorithm is then run.
-    def search(self, startCoords, goalCoords):
 
-        # Empty the queue. self is needed to make sure everything is reset
-        while (self.isQueueEmpty() == False):
-            self.popCellFromQueue()
-        
+    # Update the seach grid
+    def handleChangeToOccupancyGrid(self):
         # Create the search grid from the occupancy grid and seed
         # unvisited and occupied cells.
         if (self.searchGrid is None):
             self.searchGrid = SearchGrid.fromOccupancyGrid(self.occupancyGrid, self.robotRadius)
         else:
             self.searchGrid.updateFromOccupancyGrid()
+    
+    # The main search routine. The routine searches for a path between a given
+    # set of coordinates. These are then converted into start and destination
+    # cells in the search grid and the search algorithm is then run.
+    def search(self, startCoords, goalCoords):
+
+        self.handleChangeToOccupancyGrid()
+        
+        # Empty the queue. self is needed to make sure everything is reset
+        while (self.isQueueEmpty() == False):
+            self.popCellFromQueue()
+
+        # Check the start and end are not occupied
+        if (self.occupancyGrid.getCell(startCoords[0], startCoords[1]) > 0):
+            return False
+
+        if (self.occupancyGrid.getCell(goalCoords[0], goalCoords[1]) > 0):
+            return False
 
         # Get the start cell object and label it as such. Also set its
         # path cost to 0.
         self.start = self.searchGrid.getCellFromCoords(startCoords)
+
+        #if self.start.label is CellLabel.OBSTRUCTED:
+        #    return False
+        
         self.start.label = CellLabel.START
         self.start.pathCost = 0
 
-        # Get the goal cell object and label it.
         self.goal = self.searchGrid.getCellFromCoords(goalCoords)
+        self.goalCellLabel = self.goal.label
+        
+        #if self.goal.label is CellLabel.OBSTRUCTED:
+        #    return False
+        
         self.goal.label = CellLabel.GOAL
 
         if rospy.is_shutdown():
@@ -170,12 +202,17 @@ class GeneralForwardSearchAlgorithm(PlannerBase):
 
         # Construct the path object and mark if the goal was reached
         path = PlannedPath()
-        
+
         path.goalReached = self.goalReached
-        
-        # Initial condition - the goal cell
-        path.waypoints.append(pathEndCell)
-               
+
+        # Add the first cell to the path. We actually grow the path
+        # backwards from the goal to the start. For the goal cell, we
+        # do not include it if (a) the goal cell was occupied when we
+        # started planning and (b) trimming the path is enabled.
+        if (self.removeGoalCellFromPathIfOccupied is False) or \
+           (self.goalCellLabel is not CellLabel.OBSTRUCTED):
+            path.waypoints.append(pathEndCell)
+            
         # Start at the goal and find the parent. Find the cost associated with the parent
         cell = pathEndCell.parent
         path.travelCost = self.computeLStageAdditiveCost(pathEndCell.parent, pathEndCell)

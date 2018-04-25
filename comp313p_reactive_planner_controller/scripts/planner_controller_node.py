@@ -23,8 +23,11 @@ from comp313p_reactive_planner_controller.srv import *
 from comp313p_reactive_planner_controller.occupancy_grid import OccupancyGrid
 
 from comp313p_reactive_planner_controller.passive_planner_controller import PassivePlannerController
+from comp313p_reactive_planner_controller.reactive_planner_controller import ReactivePlannerController
 
 from comp313p_reactive_planner_controller.a_star_planner import AStarPlanner
+
+from comp313p_reactive_planner_controller.fifo_planner import FIFOPlanner
 
 from comp313p_reactive_planner_controller.move2goal_controller import Move2GoalController
 
@@ -44,44 +47,55 @@ class PlannerControllerNode(object):
         # If we are using the ground truth map, get it directly from stdr. Otherwise,
         # retrieve it from the mapper node
 
-        if rospy.get_param('use_stdr_map', True):
+        if rospy.get_param('use_reactive_planner_controller', False) is False:
             rospy.loginfo('Using the ground truth map from stdr')
+        else:
+            rospy.loginfo('Getting map size information from stdr')
 
-            # Get the map service
-            rospy.loginfo('Waiting for static_map to become available.')
-            rospy.wait_for_service('static_map') 
-            self.mapServer = rospy.ServiceProxy('static_map', GetMap)
-            rospy.loginfo('Found static_map; requesting map data')
+        # Get the map service
+        rospy.loginfo('Waiting for static_map to become available.')
+        rospy.wait_for_service('static_map') 
+        self.mapServer = rospy.ServiceProxy('static_map', GetMap)
+        rospy.loginfo('Found static_map; requesting map data')
             
-            # Query the map status
-            response = self.mapServer()
-            map = response.map
-            rospy.loginfo('Got map data')
+        # Query the map status
+        response = self.mapServer()
+        map = response.map
+        rospy.loginfo('Got map data')
             
-            # Allocate the occupancy grid and set the data from the array sent back by the map server
-            self.occupancyGrid = OccupancyGrid(map.info.width, map.info.height, map.info.resolution)
-            self.occupancyGrid.setScale(rospy.get_param('plan_scale', 5))
+        # Allocate the occupancy grid and set the data from the array sent back by the map server
+        self.occupancyGrid = OccupancyGrid(map.info.width, map.info.height, map.info.resolution)
+        self.occupancyGrid.setScale(rospy.get_param('plan_scale', 5))
+
+        # Copy data over if passive
+        if rospy.get_param('use_reactive_planner_controller', False) is True:
+            self.occupancyGrid.scaleEmptyMap()
+        else:
             self.occupancyGrid.setFromDataArrayFromMapServer(map.data)
 
-        else:
-            rospy.loginfo('Use the map from comp313p_mapper')
-            rospy.wait_for_service('request_map_update') 
-            
-
-    # TODO: Change this method to be a callback to support changes in the map
-    def updateOccupancyGridFromMapServer(self, map):
-        self.occupancyGrid.setFromDataArrayFromMapServer(map.data)
-
+    def mapUpdateCallback(self, msg):
+        rospy.loginfo("map update received")
+        self.plannerController.handleMapUpdateMessage(msg)
+        
     def createPlanner(self):
-        self.planner = AStarPlanner('AStar+Octile+Weight=1', self.occupancyGrid)
+        if rospy.get_param('use_fifo_planner', False) is True:
+            self.planner = FIFOPlanner('FIFO', self.occupancyGrid)
+        else:
+            self.planner = AStarPlanner('AStar+Octile+Weight=1', self.occupancyGrid)
         self.planner.setPauseTime(0)
         self.planner.windowHeightInPixels = rospy.get_param('maximum_window_height_in_pixels', 700)
+
+        removeGoalCellFromPathIfOccupied = rospy.get_param('remove_goal_cell_from_path_if_occupied', False)
+        self.planner.setRemoveGoalCellFromPathIfOccupied(removeGoalCellFromPathIfOccupied)
         
     def createRobotController(self):
         self.robotController = Move2GoalController(self.occupancyGrid)
 
     def createPlannerController(self):
-        self.plannerController = PassivePlannerController(self.occupancyGrid, self.planner, self.robotController)
+        if rospy.get_param('use_reactive_planner_controller', False) is True:
+            self.plannerController = ReactivePlannerController(self.occupancyGrid, self.planner, self.robotController)
+        else:
+            self.plannerController = PassivePlannerController(self.occupancyGrid, self.planner, self.robotController)
 
     def handleDriveToGoal(self, goal):
         # Report to the main loop that we have a new goal
